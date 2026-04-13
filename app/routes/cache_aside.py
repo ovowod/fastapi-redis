@@ -17,7 +17,9 @@ router = APIRouter()
 
 
 @router.get("/user/{user_id}")
-async def get_user_profile(user_id: int, rd: redis.Redis = Depends(get_redis), db: AsyncSession = Depends(get_db)):
+async def get_user_profile(
+    user_id: int, rd: redis.Redis = Depends(get_redis), db: AsyncSession = Depends(get_db)
+):
     cache_key = f"user:profile:{user_id}"
 
     cached_user = await rd.get(cache_key)
