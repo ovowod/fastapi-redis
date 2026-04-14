@@ -5,7 +5,7 @@ import redis.asyncio as redis
 from db.session import engine, Base
 import db.models  # noqa: F401 — ensures models are registered before create_all
 
-from routes import cache_aside
+from routes import cache_aside, recent_list
 
 
 @asynccontextmanager
@@ -26,3 +26,4 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(cache_aside.router, tags=["cache-aside"])
+app.include_router(recent_list.router, tags=["recent-list"])
