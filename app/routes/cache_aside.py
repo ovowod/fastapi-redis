@@ -3,6 +3,7 @@ import json
 import redis.asyncio as redis
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from dependencies.redis import get_redis
 from dependencies.db import get_db
@@ -13,12 +14,19 @@ from sqlalchemy import select
 from db.models import User
 
 
+class UserUpdateRequest(BaseModel):
+    name: str
+    email: str
+
+
 router = APIRouter()
 
 
 @router.get("/user/{user_id}")
 async def get_user_profile(
-    user_id: int, rd: redis.Redis = Depends(get_redis), db: AsyncSession = Depends(get_db)
+    user_id: int,
+    rd: redis.Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
 ):
     cache_key = f"user:profile:{user_id}"
 
@@ -41,3 +49,29 @@ async def get_user_profile(
     user_data = {"id": user.id, "name": user.name, "email": user.email}
     await rd.set(cache_key, json.dumps(user_data), ex=300)
     return user_data
+
+
+@router.put("/user/{user_id}")
+async def update_user_profile(
+    user_id: int,
+    profile: UserUpdateRequest,
+    rd: redis.Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
+):
+    cache_key = f"user:profile:{user_id}"
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.name = profile.name
+    user.email = profile.email
+
+    await db.commit()
+    await rd.delete(cache_key)
+
+    await db.refresh(user)
+
+    return {"id": user.id, "name": user.name, "email": user.email}
