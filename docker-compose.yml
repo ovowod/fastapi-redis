@@ -19,6 +19,19 @@ services:
       db:
         condition: service_healthy
 
+  # distributed session
+  app2:
+    build: app
+    container_name: app2
+    command: "uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./app:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: mysql:8.0
     container_name: db
