@@ -3,7 +3,7 @@ import json
 import redis.asyncio as redis
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from dependencies.redis import get_redis
 from dependencies.db import get_db
@@ -14,6 +14,14 @@ from sqlalchemy import select
 from db.models import User
 
 
+class UserProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    email: str
+
+
 class UserUpdateRequest(BaseModel):
     name: str
     email: str
@@ -22,7 +30,7 @@ class UserUpdateRequest(BaseModel):
 router = APIRouter()
 
 
-@router.get("/user/{user_id}")
+@router.get("/user/{user_id}", response_model=UserProfileResponse)
 async def get_user_profile(
     user_id: int,
     rd: redis.Redis = Depends(get_redis),
@@ -46,8 +54,8 @@ async def get_user_profile(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user_data = {"id": user.id, "name": user.name, "email": user.email}
-    await rd.set(cache_key, json.dumps(user_data), ex=300)
+    user_data = UserProfileResponse.model_validate(user)
+    await rd.set(cache_key, user_data.model_dump_json(), ex=300)
     return user_data
 
 
