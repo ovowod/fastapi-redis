@@ -41,13 +41,13 @@ async def increase_view_count(
         if row:
             await rd.set(view_count_key, row.view_count)
 
+    # write-back: Redis에만 기록하고 즉시 응답, 백그라운드에서 DB에 반영
     pipe = rd.pipeline()
     pipe.sadd(viewer_key, user_id)
     pipe.expire(viewer_key, 86400)
     pipe.incr(view_count_key)
+    pipe.sadd("dirty:view_articles", article_id)  # flush 대상으로 등록
     result = await pipe.execute()
-
-    # write-back: view_count는 백그라운드에서 주기적으로 DB flush (TODO: background task)
 
     return {
         "article_id": article_id,
@@ -89,10 +89,11 @@ async def increase_like_count(
     already_liked = await rd.sismember(liked_key, article_id)
 
     if already_liked:
-        # 좋아요 취소
+        # 좋아요 취소: count는 write-back, 관계 데이터(article_likes)는 write-through
         pipe = rd.pipeline()
         pipe.srem(liked_key, article_id)
         pipe.decr(like_count_key)
+        pipe.sadd("dirty:like_articles", article_id)  # flush 대상으로 등록
         result = await pipe.execute()
 
         # write-through: 누가 눌렀는지는 즉시 DB 반영
@@ -104,10 +105,11 @@ async def increase_like_count(
 
         return {"article_id": article_id, "liked": False, "total_like_count": result[1]}
 
-    # 좋아요 추가
+    # 좋아요 추가: count는 write-back, 관계 데이터(article_likes)는 write-through
     pipe = rd.pipeline()
     pipe.sadd(liked_key, article_id)
     pipe.incr(like_count_key)
+    pipe.sadd("dirty:like_articles", article_id)  # flush 대상으로 등록
     result = await pipe.execute()
 
     # write-through: 누가 눌렀는지는 즉시 DB 반영
@@ -118,8 +120,6 @@ async def increase_like_count(
         {"user_id": user_id, "article_id": article_id},
     )
     await db.commit()
-
-    # write-back: like_count는 백그라운드에서 주기적으로 DB flush (TODO: background task)
 
     return {"article_id": article_id, "liked": True, "total_like_count": result[1]}
 
