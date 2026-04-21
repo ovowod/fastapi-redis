@@ -40,6 +40,15 @@ async def send_verification_code(req_data: SendCodeRequest, rd: redis.Redis = De
     code = str(random.randint(100000, 999999))
 
     hashed_phone = hashlib.sha256(req_data.phone.encode()).hexdigest()
+    is_allowed = await rd.set(f"auth:limit:{hashed_phone}", "limit", ex=60, nx=True)
+
+    if not is_allowed:
+        limit_time = await rd.ttl(f"auth:limit:{hashed_phone}")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Please wait {int(limit_time)} seconds before requesting again",
+        )
+
     cache_key = f"auth:code:{hashed_phone}"
 
     await rd.set(cache_key, code, ex=AUTH_TIMEOUT)
