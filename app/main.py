@@ -6,7 +6,13 @@ import redis.asyncio as redis
 from db.session import engine, Base
 import db.models  # noqa: F401 — ensures models are registered before create_all
 
-from routes import cache_aside, recent_list, session_store, write_back
+from routes import (
+    cache_aside,
+    recent_list,
+    session_store,
+    write_back,
+    verification_code,
+)
 from tasks.flush_counts import flush_view_counts, flush_like_counts
 
 
@@ -37,3 +43,4 @@ app.include_router(cache_aside.router, tags=["cache-aside"])
 app.include_router(recent_list.router, tags=["recent-list"])
 app.include_router(session_store.router, tags=["session-store"])
 app.include_router(write_back.router, tags=["write-back"])
+app.include_router(verification_code.router, tags=["verification-code"])
