@@ -13,6 +13,18 @@ router = APIRouter()
 
 AUTH_TIMEOUT = 300
 
+VERIFY_AND_DELETE_SCRIPT = """
+local stored = redis.call("GET", KEYS[1])
+if not stored then
+    return 0
+end
+if stored == ARGV[1] then
+    redis.call("DEL", KEYS[1])
+    return 1
+end
+return -1
+"""
+
 
 class SendCodeRequest(BaseModel):
     phone: str
@@ -46,14 +58,13 @@ async def verify_code(req_data: VerifyCodeRequest, rd: redis.Redis = Depends(get
     hashed_phone = hashlib.sha256(req_data.phone.encode()).hexdigest()
     cache_key = f"auth:code:{hashed_phone}"
 
-    verify_code = await rd.get(cache_key)
+    verify_and_delete = rd.register_script(VERIFY_AND_DELETE_SCRIPT)
+    result = await verify_and_delete(keys=[cache_key], args=[req_data.input_code])
 
-    if not verify_code:
+    if result == 0:
         raise HTTPException(status_code=400, detail="Code expired or not requested")
 
-    if verify_code != req_data.input_code:
+    if result == -1:
         raise HTTPException(status_code=400, detail="Invalid code")
-
-    await rd.delete(cache_key)
 
     return {"message": "Authentication successful"}
