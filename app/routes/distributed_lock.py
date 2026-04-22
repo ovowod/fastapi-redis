@@ -4,6 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Depends
 import redis.asyncio as redis
+from redis.asyncio.lock import Lock
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -46,6 +47,27 @@ async def release_lock(rd, lock_name: str, identifier: str):
     return bool(result)
 
 
+async def enqueue(rd, queue_name: str, request_id: str):
+    await rd.rpush(queue_name, request_id)
+
+
+async def wait_for_turn(rd, queue_name: str, request_id: str, timeout: float = 30.0) -> bool:
+    # handoff 대신 폴링 방식 사용: 타임아웃 시 LREM으로 스스로 제거하므로
+    # 살아있는 요청만 맨 앞에 남아 고아 lock 문제가 자연스럽게 해소
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        front = await rd.lindex(queue_name, 0)
+        if front == request_id:
+            return True
+        await asyncio.sleep(0.1)
+    await rd.lrem(queue_name, 1, request_id)
+    return False
+
+
+async def dequeue(rd, queue_name: str):
+    await rd.lpop(queue_name)
+
+
 @router.post("/stock/reduce/{item_id}")
 async def reduce_stock(
     item_id: str,
@@ -86,6 +108,66 @@ async def reduce_stock(
 
     finally:
         await release_lock(rd, lock_name, lock_id)
+
+
+@router.post("/stock/queue-reduce/{item_id}")
+async def queue_reduce_stock(
+    item_id: str,
+    user_id: str = "unknown",
+    rd: redis.Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
+):
+    queue_name = f"queue:item:{item_id}"
+    lock_name = f"lock:item:{item_id}"
+    request_id = str(uuid.uuid4())
+
+    # 큐 뒤에 줄 서기. 먼저 온 순서대로 처리됨 (FIFO)
+    await enqueue(rd, queue_name, request_id)
+
+    # 맨 앞 자리가 될 때까지 대기.
+    # 타임아웃 시 LREM으로 스스로 큐에서 제거하고 포기
+    my_turn = await wait_for_turn(rd, queue_name, request_id)
+    if not my_turn:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Queue wait timed out. Please try again later. (user: {user_id})",
+        )
+
+    # 내 차례가 됐을 때 lock 추가로 획득
+    lock_id = await acquire_lock(rd, lock_name, acquire_timeout=5.0)
+    if not lock_id:
+        await dequeue(rd, queue_name)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Failed to acquire lock. Please try again later. (user: {user_id})",
+        )
+
+    try:
+        result = await db.execute(select(Stock).where(Stock.item_id == item_id))
+        stock = result.scalar_one_or_none()
+
+        if stock is None:
+            raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+
+        if stock.quantity <= 0:
+            raise HTTPException(status_code=409, detail=f"Item {item_id} is out of stock")
+
+        stock.quantity -= 1
+        await db.commit()
+
+        print(
+            f"[Queue] Stock reduced for item {item_id} (user: {user_id}, remaining: {stock.quantity})"
+        )
+        return {
+            "message": f"Item {item_id} stock reduced successfully",
+            "user": user_id,
+            "remaining": stock.quantity,
+        }
+
+    finally:
+        await release_lock(rd, lock_name, lock_id)
+        # 처리 완료 후 큐에서 제거
+        await dequeue(rd, queue_name)
 
 
 @router.post("/stock/reset/{item_id}")
