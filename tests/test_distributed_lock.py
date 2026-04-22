@@ -116,7 +116,48 @@ async def test_sequential_lock():
     print("[PASS] Sequential requests processed without deadlock.")
 
 
+async def request_redlock_reduce(client: httpx.AsyncClient, user_id: str):
+    resp = await client.post(
+        f"{BASE_URL}/stock/redlock-reduce/{ITEM_ID}",
+        params={"user_id": user_id},
+    )
+    status = resp.status_code
+    body = resp.json()
+    print(f"[{user_id}] {status} -> {body}")
+    return status, body
+
+
+async def test_redlock():
+    """
+    redis-py 내장 Lock 사용 → 10명 동시 요청, 재고(5개)만큼만 성공
+    """
+    print("\n=== Test: Redlock (redis-py built-in Lock), stock=5 ===")
+    start = time.time()
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        await reset_stock(client)
+        tasks = [request_redlock_reduce(client, f"user-{i}") for i in range(1, 11)]
+        results = await asyncio.gather(*tasks)
+
+    success = sum(1 for status, _ in results if status == 200)
+    out_of_stock = sum(
+        1
+        for status, body in results
+        if status == 409 and "out of stock" in body.get("detail", "")
+    )
+    timeout = sum(1 for status, _ in results if status == 409) - out_of_stock
+
+    print(
+        f"\nSuccess: {success}, Out of stock: {out_of_stock}, Lock timeout: {timeout}"
+    )
+    print(f"Total elapsed: {time.time() - start:.2f}s")
+    assert success == INITIAL_STOCK, (
+        f"Expected {INITIAL_STOCK} successes, got {success}"
+    )
+    print(f"[PASS] Redlock: exactly {INITIAL_STOCK} requests reduced stock.")
+
+
 if __name__ == "__main__":
     asyncio.run(test_concurrent_lock())
     asyncio.run(test_fifo_order())
     asyncio.run(test_sequential_lock())
+    asyncio.run(test_redlock())

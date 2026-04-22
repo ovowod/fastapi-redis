@@ -170,6 +170,53 @@ async def queue_reduce_stock(
         await dequeue(rd, queue_name)
 
 
+@router.post("/stock/redlock-reduce/{item_id}")
+async def redlock_reduce_stock(
+    item_id: str,
+    user_id: str = "unknown",
+    rd: redis.Redis = Depends(get_redis),
+    db: AsyncSession = Depends(get_db),
+):
+    lock_name = f"lock:item:{item_id}"
+
+    try:
+        async with Lock(
+            rd,
+            lock_name,
+            timeout=5,  # 락 TTL(초): 크래시 나도 5초 후 자동 해제 → lock_timeout_ms=5000
+            sleep=0.1,  # 락 획득 재시도 간격 → asyncio.sleep(0.1)
+            blocking=True,  # True: blocking_timeout까지 대기, False: 즉시 예외
+            blocking_timeout=10,  # 락 획득 최대 대기 시간(초) → acquire_timeout=10.0
+        ):
+            result = await db.execute(select(Stock).where(Stock.item_id == item_id))
+            stock = result.scalar_one_or_none()
+
+            if stock is None:
+                raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+
+            if stock.quantity <= 0:
+                raise HTTPException(status_code=409, detail=f"Item {item_id} is out of stock")
+
+            stock.quantity -= 1
+            await db.commit()
+
+            print(
+                f"[Redlock] Stock reduced for item {item_id} (user: {user_id}, remaining: {stock.quantity})"
+            )
+            return {
+                "message": f"Item {item_id} stock reduced successfully",
+                "user": user_id,
+                "remaining": stock.quantity,
+            }
+    except Exception as e:
+        if "LockNotOwnedError" in type(e).__name__ or "LockError" in type(e).__name__:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Failed to acquire lock. Please try again. (user: {user_id})",
+            )
+        raise
+
+
 @router.post("/stock/reset/{item_id}")
 async def reset_stock(
     item_id: str,
