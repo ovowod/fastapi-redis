@@ -31,3 +31,12 @@ CREATE TABLE IF NOT EXISTS article_likes (
     FOREIGN KEY (user_id)    REFERENCES users(id),
     FOREIGN KEY (article_id) REFERENCES articles(id)
 );
+
+CREATE TABLE IF NOT EXISTS stocks (
+    item_id  VARCHAR(100) NOT NULL,
+    quantity INT          NOT NULL DEFAULT 0,
+    PRIMARY KEY (item_id)
+);
+
+INSERT INTO stocks (item_id, quantity) VALUES
+    ('100', 5);

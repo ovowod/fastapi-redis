@@ -4,6 +4,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from db.session import Base
 
 
+class Stock(Base):
+    __tablename__ = "stocks"
+
+    item_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class User(Base):
     __tablename__ = "users"
 
