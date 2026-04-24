@@ -6,7 +6,7 @@ import redis.asyncio as redis
 from db.session import engine, Base
 import db.models  # noqa: F401 — ensures models are registered before create_all
 
-from middleware import rate_limit_middleware
+from middlewares import rate_limit_middleware
 from routes import (
     cache_aside,
     recent_list,
