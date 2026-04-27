@@ -1,4 +1,3 @@
-import time
 import uuid
 
 from fastapi import Request
@@ -9,6 +8,27 @@ LIMIT = 5
 WINDOW = 60
 
 
+LUA_SCRIPT = """
+local key = KEYS[1]
+local time_result = redis.call('TIME')
+local now = tonumber(time_result[1]) + tonumber(time_result[2]) / 1e6
+local window = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local member = ARGV[3]
+
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+local count = redis.call('ZCARD', key)
+
+if count >= limit then
+    return 0
+end
+
+redis.call('ZADD', key, now, member)
+redis.call('EXPIRE', key, window + 5)
+return 1
+"""
+
+
 async def rate_limit_sliding_window(request: Request, call_next):
     if request.url.path in ["/docs", "/openapi.json"]:
         return await call_next(request)
@@ -16,16 +36,11 @@ async def rate_limit_sliding_window(request: Request, call_next):
     rd = request.app.state.redis
     user_identifier = request.client.host if request.client else "127.0.0.1"
     cache_key = f"rate_limit:{user_identifier}"
+    member = uuid.uuid4().hex[:6]
 
-    current_time = time.time()
+    result = await rd.eval(LUA_SCRIPT, 1, cache_key, WINDOW, LIMIT, member)
 
-    # 현재 시간 - WINDOW 보다 오래된 요청 정리
-    await rd.zremrangebyscore(cache_key, 0, current_time - WINDOW)
-
-    # 개수 확인
-    current_count = await rd.zcard(cache_key)
-
-    if current_count >= LIMIT:
+    if result == 0:
         return JSONResponse(
             status_code=429,
             content={
@@ -33,10 +48,5 @@ async def rate_limit_sliding_window(request: Request, call_next):
                 "detail": f"Rate limit exceeded",
             },
         )
-
-    # 제한을 넘지 않았을 때만 타임스탬프 기록
-    member = f"{current_time}-{uuid.uuid4().hex[:6]}"
-    await rd.zadd(cache_key, {member: current_time})
-    await rd.expire(cache_key, WINDOW + 5)
 
     return await call_next(request)
