@@ -1,10 +1,38 @@
-import time
-
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 CAPACITY = 10
 REFILL_RATE = 0.1
+TTL = 65
+
+
+LUA_SCRIPT = """
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+
+local time_result = redis.call('TIME')
+local now = tonumber(time_result[1]) + tonumber(time_result[2]) / 1e6
+
+local stored = redis.call('HMGET', key, 'tokens', 'last_refill')
+local tokens
+
+if stored[1] == false then
+    tokens = capacity
+else
+    local elapsed = now - tonumber(stored[2])
+    tokens = math.min(capacity, tonumber(stored[1]) + elapsed * refill_rate)
+end
+
+if tokens < 1 then
+    return 0
+end
+
+redis.call('HSET', key, 'tokens', tokens - 1, 'last_refill', now)
+redis.call('EXPIRE', key, ttl)
+return 1
+"""
 
 
 async def rate_limit_token_bucket(request: Request, call_next):
@@ -15,18 +43,9 @@ async def rate_limit_token_bucket(request: Request, call_next):
     user_identifier = request.client.host if request.client else "127.0.0.1"
     cache_key = f"rate_limit:{user_identifier}"
 
-    current_time = time.time()
+    result = await rd.eval(LUA_SCRIPT, 1, cache_key, CAPACITY, REFILL_RATE, TTL)
 
-    stored_tokens = await rd.hget(cache_key, "tokens")
-    last_refill = await rd.hget(cache_key, "last_refill")
-
-    if stored_tokens is None or last_refill is None:
-        tokens = CAPACITY
-    else:
-        elapsed = current_time - float(last_refill)
-        tokens = min(CAPACITY, float(stored_tokens) + elapsed * REFILL_RATE)
-
-    if tokens < 1:
+    if result == 0:
         return JSONResponse(
             status_code=429,
             content={
@@ -34,8 +53,5 @@ async def rate_limit_token_bucket(request: Request, call_next):
                 "detail": f"Rate limit exceeded",
             },
         )
-
-    await rd.hset(cache_key, mapping={"tokens": tokens - 1, "last_refill": current_time})
-    await rd.expire(cache_key, CAPACITY + 5)
 
     return await call_next(request)
