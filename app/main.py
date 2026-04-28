@@ -6,7 +6,11 @@ import redis.asyncio as redis
 from db.session import engine, Base
 import db.models  # noqa: F401 — ensures models are registered before create_all
 
-from middlewares import rate_limit_fixed_window, rate_limit_sliding_window
+from middlewares import (
+    rate_limit_fixed_window,
+    rate_limit_sliding_window,
+    rate_limit_token_bucket,
+)
 from routes import (
     cache_aside,
     recent_list,
@@ -42,7 +46,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # app.middleware("http")(rate_limit_fixed_window)
-app.middleware("http")(rate_limit_sliding_window)
+# app.middleware("http")(rate_limit_sliding_window)
+app.middleware("http")(rate_limit_token_bucket)
 
 app.include_router(cache_aside.router, tags=["cache-aside"])
 app.include_router(recent_list.router, tags=["recent-list"])
