@@ -18,6 +18,7 @@ from routes import (
     write_back,
     verification_code,
     distributed_lock,
+    rank_score,
 )
 from tasks.flush_counts import flush_view_counts, flush_like_counts
 
@@ -55,3 +56,4 @@ app.include_router(session_store.router, tags=["session-store"])
 app.include_router(write_back.router, tags=["write-back"])
 app.include_router(verification_code.router, tags=["verification-code"])
 app.include_router(distributed_lock.router, tags=["distributed-lock"])
+app.include_router(rank_score.router, tags=["rank-score"])
