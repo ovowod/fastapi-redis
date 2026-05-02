@@ -33,15 +33,23 @@ async def lifespan(app: FastAPI):
     await app.state.redis.ping()
     print("Redis Connected.")
 
+    app.state.subscribers = set()  # SSE 클라이언트 큐 레지스트리 (redis_listener가 공유)
+
     view_task = asyncio.create_task(flush_view_counts(app.state.redis))
     like_task = asyncio.create_task(flush_like_counts(app.state.redis))
-    pub_sub_task = asyncio.create_task(pub_sub.redis_listener(app.state.redis))
+    pub_sub_task = asyncio.create_task(
+        pub_sub.redis_listener(app.state.redis, app.state.subscribers)
+    )
 
     yield
 
     view_task.cancel()
     like_task.cancel()
     pub_sub_task.cancel()
+
+    # 태스크가 완전히 종료될 때까지 대기 (Redis 닫기 전에 보장)
+    # return_exceptions=True: CancelledError를 예외로 올리지 않고 반환값으로 처리
+    await asyncio.gather(view_task, like_task, pub_sub_task, return_exceptions=True)
 
     await app.state.redis.aclose()
     print("Redis Disconnected..")
