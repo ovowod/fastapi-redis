@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Pub/Sub SSE</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 0 16px;
+      }
+
+      #status {
+        font-weight: bold;
+        margin-bottom: 12px;
+      }
+
+      #status.connected {
+        color: green;
+      }
+
+      #status.disconnected {
+        color: red;
+      }
+
+      #log {
+        border: 1px solid #ccc;
+        height: 300px;
+        overflow-y: auto;
+        padding: 8px;
+        margin-bottom: 16px;
+        background: #f9f9f9;
+      }
+
+      .log-item {
+        margin: 4px 0;
+        font-size: 14px;
+      }
+
+      .log-item time {
+        color: #888;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+
+      form {
+        display: flex;
+        gap: 8px;
+      }
+
+      input[type="text"] {
+        flex: 1;
+        padding: 8px;
+        font-size: 14px;
+      }
+
+      button {
+        padding: 8px 16px;
+        cursor: pointer;
+      }
+
+      #btn-disconnect {
+        background: #e55;
+        color: white;
+        border: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h2>Pub/Sub SSE
+      <small style="font-size:14px;color:#888">port:
+        <span id="port"></span></small>
+    </h2>
+
+    <div id="status" class="disconnected">● 연결 안됨</div>
+    <div id="log"></div>
+
+    <form id="publish-form">
+      <input type="text" id="message-input" placeholder="메시지 입력..." required="required"/>
+      <button type="submit">Publish</button>
+      <button type="button" id="btn-disconnect">연결 끊기</button>
+    </form>
+
+    <script>
+      document
+        .getElementById("port")
+        .textContent = window.location.port || "80";
+
+      const statusEl = document.getElementById("status");
+      const logEl = document.getElementById("log");
+      let eventSource = null;
+
+      function addLog(text, type = "recv") {
+        const item = document.createElement("div");
+        item.className = "log-item";
+
+        const now = new Date().toLocaleTimeString();
+        item.innerHTML = `<time>${now}</time>${type === "send"
+          ? "→ "
+          : "← "}${text}`;
+        logEl.appendChild(item);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function connect() {
+        if (eventSource) 
+          return;
+        
+        eventSource = new EventSource("/stream-notices");
+
+        eventSource.onopen = () => {
+          statusEl.textContent = "● 연결됨";
+          statusEl.className = "connected";
+          addLog("SSE 연결 성공");
+        };
+
+        eventSource.onmessage = (e) => {
+          addLog(e.data);
+        };
+
+        eventSource.onerror = () => {
+          statusEl.textContent = "● 연결 끊김 (재연결 시도 중...)";
+          statusEl.className = "disconnected";
+          // EventSource는 기본적으로 오류 시 자동 재연결함
+          // 명시적으로 끊으려면 eventSource.close() 호출
+        };
+      }
+
+      document
+        .getElementById("btn-disconnect")
+        .addEventListener("click", () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+            statusEl.textContent = "● 연결 끊김";
+            statusEl.className = "disconnected";
+            addLog("연결 종료");
+          }
+        });
+
+      document
+        .getElementById("publish-form")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const input = document.getElementById("message-input");
+          const msg = input
+            .value
+            .trim();
+          if (!msg) 
+            return;
+          
+          const res = await fetch(`/publish-notice?message=${encodeURIComponent(msg)}`, {method: "POST"});
+          if (res.ok) {
+            const data = await res.json();
+            addLog(`${msg} (구독자: ${data.received_subscribers}명)`, "send");
+            input.value = "";
+          }
+        });
+
+      connect();
+    </script>
+  </body>
+
+</html>
