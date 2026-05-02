@@ -1,8 +1,7 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
 import redis.asyncio as redis
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 
 from sse_starlette.sse import EventSourceResponse
@@ -12,6 +11,28 @@ from dependencies.redis import get_redis
 router = APIRouter()
 
 NOTICE_CHANNEL = "system:notices"
+
+
+# 연결된 클라이언트 큐 목록
+subscribers: set[asyncio.Queue] = set()
+
+
+# 앱 시작 시 백그라운드에서 Redis 구독
+async def redis_listener(rd):
+    while True:
+        try:
+            async with rd.pubsub() as pubsub:
+                await pubsub.subscribe(NOTICE_CHANNEL)
+                while True:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+
+                    if message:
+                        for q in list(subscribers):  # 순회 중 동시 수정 방지
+                            await q.put(message["data"])
+                    await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"redis_listener error: {e}, retrying in 3s...")
+            await asyncio.sleep(3)
 
 
 @router.get("/pub_sub")
@@ -33,27 +54,25 @@ async def send_notice(message: str, rd: redis.Redis = Depends(get_redis)):
 
 
 @router.get("/stream-notices")
-async def sse_stream_notices(request: Request, rd: redis.Redis = Depends(get_redis)):
+async def sse_stream_notices(request: Request):
     """
     subscribe: SSE 방식
     """
 
-    async def event_generator():
-        # rd.pubsub 으로 구독 전용 객체 생성
-        async with rd.pubsub() as pubsub:
-            await pubsub.subscribe(NOTICE_CHANNEL)
+    queue = asyncio.Queue()
+    subscribers.add(queue)
 
-            try:
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    # 메시지 수신 대기
-                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                    if message:
-                        print("message:", message)
-                        yield {"data": message["data"]}
-                    await asyncio.sleep(0.1)
-            finally:
-                await pubsub.unsubscribe(NOTICE_CHANNEL)
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield {"data": data}
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            subscribers.discard(queue)
 
     return EventSourceResponse(event_generator())

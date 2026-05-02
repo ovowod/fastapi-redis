@@ -35,11 +35,13 @@ async def lifespan(app: FastAPI):
 
     view_task = asyncio.create_task(flush_view_counts(app.state.redis))
     like_task = asyncio.create_task(flush_like_counts(app.state.redis))
+    pub_sub_task = asyncio.create_task(pub_sub.redis_listener(app.state.redis))
 
     yield
 
     view_task.cancel()
     like_task.cancel()
+    pub_sub_task.cancel()
 
     await app.state.redis.aclose()
     print("Redis Disconnected..")
@@ -49,7 +51,7 @@ app = FastAPI(lifespan=lifespan)
 
 # app.middleware("http")(rate_limit_fixed_window)
 # app.middleware("http")(rate_limit_sliding_window)
-app.middleware("http")(rate_limit_token_bucket)
+# app.middleware("http")(rate_limit_token_bucket)
 
 app.include_router(cache_aside.router, tags=["cache-aside"])
 app.include_router(recent_list.router, tags=["recent-list"])
