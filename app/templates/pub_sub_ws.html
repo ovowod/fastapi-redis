@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Pub/Sub WebSocket</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        max-width: 600px;
+        margin: 40px auto;
+        padding: 0 16px;
+      }
+
+      #status {
+        font-weight: bold;
+        margin-bottom: 12px;
+      }
+
+      #status.connected {
+        color: green;
+      }
+
+      #status.disconnected {
+        color: red;
+      }
+
+      #log {
+        border: 1px solid #ccc;
+        height: 300px;
+        overflow-y: auto;
+        padding: 8px;
+        margin-bottom: 16px;
+        background: #f9f9f9;
+      }
+
+      .log-item {
+        margin: 4px 0;
+        font-size: 14px;
+      }
+
+      .log-item time {
+        color: #888;
+        font-size: 12px;
+        margin-right: 8px;
+      }
+
+      form {
+        display: flex;
+        gap: 8px;
+      }
+
+      input[type="text"] {
+        flex: 1;
+        padding: 8px;
+        font-size: 14px;
+      }
+
+      button {
+        padding: 8px 16px;
+        cursor: pointer;
+      }
+
+      #btn-disconnect {
+        background: #e55;
+        color: white;
+        border: none;
+      }
+
+      #btn-reconnect {
+        background: #5a5;
+        color: white;
+        border: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h2>Pub/Sub WebSocket
+      <small style="font-size:14px;color:#888">port:
+        <span id="port"></span></small>
+    </h2>
+
+    <div id="status" class="disconnected">● 연결 안됨</div>
+    <div id="log"></div>
+
+    <form id="publish-form">
+      <input type="text" id="message-input" placeholder="메시지 입력..." required="required"/>
+      <button type="submit">Publish</button>
+      <button type="button" id="btn-disconnect">연결 끊기</button>
+      <button type="button" id="btn-reconnect">재연결</button>
+    </form>
+
+    <script>
+      document
+        .getElementById("port")
+        .textContent = window.location.port || "80";
+
+      const statusEl = document.getElementById("status");
+      const logEl = document.getElementById("log");
+      let ws = null;
+
+      function addLog(text, type = "recv") {
+        const item = document.createElement("div");
+        item.className = "log-item";
+        const now = new Date().toLocaleTimeString();
+        item.innerHTML = `<time>${now}</time>${type === "send" ? "→ " : "← "}${text}`;
+        logEl.appendChild(item);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function connect() {
+        if (ws) return;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(`${proto}//${location.host}/ws/notices`);
+
+        ws.onopen = () => {
+          statusEl.textContent = "● 연결됨";
+          statusEl.className = "connected";
+          addLog("WebSocket 연결 성공");
+        };
+
+        ws.onmessage = (e) => {
+          addLog(e.data);
+        };
+
+        ws.onclose = () => {
+          statusEl.textContent = "● 연결 끊김";
+          statusEl.className = "disconnected";
+          ws = null;
+          addLog("연결 종료");
+        };
+
+        ws.onerror = () => {
+          statusEl.textContent = "● 연결 오류";
+          statusEl.className = "disconnected";
+        };
+      }
+
+      document
+        .getElementById("btn-disconnect")
+        .addEventListener("click", () => {
+          if (ws) ws.close();
+        });
+
+      document
+        .getElementById("btn-reconnect")
+        .addEventListener("click", () => {
+          connect();
+        });
+
+      document
+        .getElementById("publish-form")
+        .addEventListener("submit", (e) => {
+          e.preventDefault();
+          const input = document.getElementById("message-input");
+          const msg = input.value.trim();
+          if (!msg || !ws) return;
+
+          ws.send(msg);  // WebSocket으로 직접 전송 → 서버가 Redis에 publish
+          addLog(msg, "send");
+          input.value = "";
+        });
+
+      connect();
+    </script>
+  </body>
+
+</html>

@@ -20,6 +20,7 @@ from routes import (
     distributed_lock,
     rank_score,
     pub_sub,
+    pub_sub_ws,
 )
 from tasks.flush_counts import flush_view_counts, flush_like_counts
 
@@ -33,12 +34,16 @@ async def lifespan(app: FastAPI):
     await app.state.redis.ping()
     print("Redis Connected.")
 
-    app.state.subscribers = set()  # SSE 클라이언트 큐 레지스트리 (redis_listener가 공유)
+    app.state.subscribers = set()
+    app.state.ws_subscribers = set()
 
     view_task = asyncio.create_task(flush_view_counts(app.state.redis))
     like_task = asyncio.create_task(flush_like_counts(app.state.redis))
     pub_sub_task = asyncio.create_task(
         pub_sub.redis_listener(app.state.redis, app.state.subscribers)
+    )
+    pub_sub_ws_task = asyncio.create_task(
+        pub_sub_ws.redis_listener(app.state.redis, app.state.ws_subscribers)
     )
 
     yield
@@ -46,10 +51,13 @@ async def lifespan(app: FastAPI):
     view_task.cancel()
     like_task.cancel()
     pub_sub_task.cancel()
+    pub_sub_ws_task.cancel()
 
     # 태스크가 완전히 종료될 때까지 대기 (Redis 닫기 전에 보장)
     # return_exceptions=True: CancelledError를 예외로 올리지 않고 반환값으로 처리
-    await asyncio.gather(view_task, like_task, pub_sub_task, return_exceptions=True)
+    await asyncio.gather(
+        view_task, like_task, pub_sub_task, pub_sub_ws_task, return_exceptions=True
+    )
 
     await app.state.redis.aclose()
     print("Redis Disconnected..")
@@ -69,3 +77,4 @@ app.include_router(verification_code.router, tags=["verification-code"])
 app.include_router(distributed_lock.router, tags=["distributed-lock"])
 app.include_router(rank_score.router, tags=["rank-score"])
 app.include_router(pub_sub.router, tags=["pub-sub"])
+app.include_router(pub_sub_ws.router, tags=["pub-sub-ws"])
