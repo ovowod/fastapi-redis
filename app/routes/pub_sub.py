@@ -3,6 +3,7 @@ import redis.asyncio as redis
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from sse_starlette.sse import EventSourceResponse
 
@@ -12,6 +13,10 @@ router = APIRouter()
 
 NOTICE_CHANNEL = "system:notices"
 QUEUE_MAX_SIZE = 100
+
+
+class NoticeRequest(BaseModel):
+    message: str
 
 
 async def redis_listener(rd, subscribers: set[asyncio.Queue]):
@@ -48,13 +53,13 @@ async def index():
 
 
 @router.post("/publish-notice")
-async def send_notice(message: str, rd: redis.Redis = Depends(get_redis)):
+async def send_notice(body: NoticeRequest, rd: redis.Redis = Depends(get_redis)):
     """
     Redis 채널에 메시지를 publish
     """
-    subscriber_count = await rd.publish(NOTICE_CHANNEL, message)
+    subscriber_count = await rd.publish(NOTICE_CHANNEL, body.message)
     return {
-        "message": message,
+        "message": body.message,
         "status": "success",
         "received_subscribers": subscriber_count,
     }

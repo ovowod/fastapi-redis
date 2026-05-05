@@ -153,7 +153,11 @@
           if (!msg) 
             return;
           
-          const res = await fetch(`/publish-notice?message=${encodeURIComponent(msg)}`, {method: "POST"});
+          const res = await fetch("/publish-notice", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({message: msg}),
+          });
           if (res.ok) {
             const data = await res.json();
             addLog(`${msg} (구독자: ${data.received_subscribers}명)`, "send");
