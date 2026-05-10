@@ -6,6 +6,8 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - shared
 
   app:
     build: app
@@ -18,6 +20,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - shared
 
   # distributed session
   # app2:
@@ -31,7 +35,9 @@ services:
   #   depends_on:
   #     db:
   #       condition: service_healthy
-
+  #   networks:
+  #     - shared
+  
   db:
     image: mysql:8.0
     container_name: db
@@ -46,6 +52,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - shared
+
+networks:
+  shared:
+    name: fastapi-redis-shared
 
 volumes:
   redis_data:

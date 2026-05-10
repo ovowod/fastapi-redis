@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s  # 메트릭 수집 주기 (실무에서는 주로 15s, 여기선 빠른 확인을 위해 5s)
+
+scrape_configs:
+  # job_name: Prometheus 내부에서 이 수집 대상을 식별하는 이름
+  - job_name: 'redis_exporter'
+    static_configs:
+      # redis_exporter 컨테이너가 9121 포트로 Redis 메트릭을 노출
+      - targets: ['redis-exporter:9121']

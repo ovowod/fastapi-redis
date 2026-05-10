@@ -1,0 +1,42 @@
+services:
+  # redis exporter: 통역
+  redis-exporter:
+    image: oliver006/redis_exporter
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    ports:
+      - "9121:9121"
+    networks:
+      - shared
+  
+  # prometheus: 데이터 수집/저장
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - shared
+  
+  # grafana: 시각화 대시보드
+  grafana:
+    image: grafana/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - shared
+
+networks:
+    shared:
+      external: true                                                                                                                                                                  
+      name: fastapi-redis-shared
+
+volumes:
+  prometheus-data:
+  grafana-data:
